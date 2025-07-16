@@ -7,13 +7,15 @@ import random
 from collections import Counter
 from operator import itemgetter
 from TaiwanLottery import TaiwanLotteryCrawler
+import json, os
+from google.oauth2.service_account import Credentials
 
 # === Google Sheets 認證 ===
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-SERVICE_ACCOUNT_FILE = 'lottocatch-18a4c60ac5b7.json'
-SPREADSHEET_ID = '1dJd_TqVknDcGNQWxo23AiJRXSdunbETDZI1HrY4vzvc'
+SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
 
-creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+creds_info = json.loads(os.environ['GOOGLE_SHEET_JSON'])
+creds = Credentials.from_service_account_info(creds_info, scopes=['https://www.googleapis.com/auth/spreadsheets'])
 client = gspread.authorize(creds)
 crawler = TaiwanLotteryCrawler()
 now = datetime.now()
