@@ -6,7 +6,7 @@ import pandas as pd
 import random
 from collections import Counter
 from operator import itemgetter
-from TaiwanLotteryCrawler import TaiwanLotteryCrawler
+from TaiwanLottery import TaiwanLotteryCrawler
 import json, os
 
 # === 🔐 Monkey Patch: requests.get 全域改用 SSL 免驗證版本 ===
