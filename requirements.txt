@@ -2,6 +2,6 @@ Flask
 gspread
 google-auth
 pandas
-git+https://github.com/bananaya/TaiwanLotteryCrawler.git@main
+git+https://github.com/bananaya/TaiwanLotteryCrawler.git@master
 requests
 urllib3
