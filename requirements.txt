@@ -4,4 +4,7 @@ google-auth
 pandas
 TaiwanLottery
 requests
-urllib3.util
+urllib3
+json
+os
+ssl
