@@ -11,7 +11,6 @@ import json, os
 from google.oauth2.service_account import Credentials
 
 # === Google Sheets 認證 ===
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
 
 creds_info = json.loads(os.environ['GOOGLE_SHEET_JSON'])
@@ -96,7 +95,7 @@ def generate_recommendations_from_sheet(sheet_name, number_count, number_range):
                 continue
             return pick
 
-    picks = [generate() for _ in range(1000000)]
+    picks = [generate() for _ in range(50000)]
     flat = [n for pick in picks for n in pick]
     most_common = [num for num, _ in Counter(flat).most_common(number_count * 2)]
     final_pick = sorted(most_common[:number_count])
