@@ -6,16 +6,33 @@ import pandas as pd
 import random
 from collections import Counter
 from operator import itemgetter
-from TaiwanLottery import TaiwanLotteryCrawler
+from TaiwanLotteryCrawler import TaiwanLotteryCrawler
 import json, os
-from google.oauth2.service_account import Credentials
+
+# === 🔐 Monkey Patch: requests.get 全域改用 SSL 免驗證版本 ===
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.poolmanager import PoolManager
+import ssl
+
+class SSLBypassAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+session = requests.Session()
+session.mount("https://", SSLBypassAdapter())
+requests.get = session.get  # 🧠 Monkey Patch 關鍵！
 
 # === Google Sheets 認證 ===
 SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
-
 creds_info = json.loads(os.environ['GOOGLE_SHEET_JSON'])
 creds = Credentials.from_service_account_info(creds_info, scopes=['https://www.googleapis.com/auth/spreadsheets'])
 client = gspread.authorize(creds)
+
 crawler = TaiwanLotteryCrawler()
 now = datetime.now()
 start_year = now.year - 10
