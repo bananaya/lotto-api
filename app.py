@@ -69,10 +69,13 @@ def generate_recommendations_from_sheet(sheet_name, number_count, number_range):
     if len(records[0]) > len(columns):
         columns += ["special"]
     df = pd.DataFrame(records, columns=columns)
-    
+        
     # 整理號碼欄位並轉為整數
     number_cols = [f'num{i}' for i in range(1, number_count + 1)]
+    df[number_cols] = df[number_cols].apply(pd.to_numeric, errors='coerce')
+    df = df.dropna(subset=number_cols)  # 去除不完整或無法解析的資料
     df[number_cols] = df[number_cols].astype(int)
+
 
     # 熱號 / 冷號
     all_numbers = df[number_cols].values.flatten()
@@ -148,10 +151,10 @@ def recommend():
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet("推薦號碼")
     for name, count, num_range in games:
         pick = generate_recommendations_from_sheet(name, count, num_range)
-        row = [today, name, "統計推薦"] + pick
+        row = [str(today), str(game_name), "統計推薦"] + [str(int(n)) for n in pick]
         result.append(row)
     sheet.append_rows(result)
-    return jsonify({"status": "ok", "data": result})
+    return jsonify({"status": "ok", "data": result})    
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
