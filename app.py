@@ -8,36 +8,17 @@ from collections import Counter
 from operator import itemgetter
 from TaiwanLottery import TaiwanLotteryCrawler
 import json, os
-
-# === 🔐 Monkey Patch: requests.get 全域改用 SSL 免驗證版本 ===
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.poolmanager import PoolManager
-import ssl
-
-class SSLBypassAdapter(HTTPAdapter):
-    def init_poolmanager(self, *args, **kwargs):
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        kwargs['ssl_context'] = ctx
-        return super().init_poolmanager(*args, **kwargs)
-
-session = requests.Session()
-session.mount("https://", SSLBypassAdapter())
-requests.get = session.get  # 🧠 Monkey Patch 關鍵！
+from google.oauth2.service_account import Credentials
 
 # === Google Sheets 認證 ===
 SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
+
 creds_info = json.loads(os.environ['GOOGLE_SHEET_JSON'])
 creds = Credentials.from_service_account_info(creds_info, scopes=['https://www.googleapis.com/auth/spreadsheets'])
 client = gspread.authorize(creds)
-
 crawler = TaiwanLotteryCrawler()
 now = datetime.now()
 start_year = now.year - 10
-
-app = Flask(__name__)
 
 # === 彩券欄位對應 ===
 def extract_lotto649(draw, date_str):
@@ -86,37 +67,64 @@ def generate_recommendations_from_sheet(sheet_name, number_count, number_range):
     if len(records[0]) > len(columns):
         columns += ["special"]
     df = pd.DataFrame(records, columns=columns)
-    all_numbers = df[[f'num{i}' for i in range(1, number_count + 1)]].astype(int).values.flatten()
+    
+    # 整理號碼欄位並轉為整數
+    number_cols = [f'num{i}' for i in range(1, number_count + 1)]
+    df[number_cols] = df[number_cols].astype(int)
+
+    # 熱號 / 冷號
+    all_numbers = df[number_cols].values.flatten()
     number_counts = Counter(all_numbers)
-    hot = [num for num, _ in number_counts.most_common(5)]
-    cold = [num for num, _ in number_counts.most_common()[-5:]]
-    last_seen = {i: 0 for i in range(1, number_range + 1)}
-    for i, row in df.iterrows():
-        for n in row[2:2 + number_count]:
-            last_seen[int(n)] = i
-    missing = sorted([(k, len(df) - v) for k, v in last_seen.items()], key=lambda x: -x[1])
-    overdue = [num for num, _ in missing[:15]]
-    all_pool = set(range(1, number_range + 1))
-    exclude = set(hot) | set(cold) | {1, 2, number_range - 1, number_range}
-    pool = list((all_pool - exclude) | set(overdue))
+    hot_numbers = [num for num, _ in number_counts.most_common(10)]
+    cold_numbers = [num for num, _ in number_counts.most_common()][-10:]
+
+    # 遺漏號（多久沒出現）
+    last_seen = {i: -1 for i in range(1, number_range + 1)}
+    for idx, row in df[::-1].iterrows():
+        for n in row[number_cols]:
+            if last_seen[n] == -1:
+                last_seen[n] = len(df) - idx
+    overdue_numbers = sorted(last_seen.items(), key=lambda x: -x[1])[:15]
+    overdue_numbers = [num for num, _ in overdue_numbers]
+
+    # 平均值 & 標準差
+    df['mean'] = df[number_cols].mean(axis=1)
+    df['std'] = df[number_cols].std(axis=1)
+    focused_df = df[df['std'] < 10]  # 集中期數
+    focused_numbers = focused_df[number_cols].values.flatten()
+    focused_pool = set(focused_numbers)
+
+    # 整合號碼池
+    candidate_pool = (set(hot_numbers) | set(cold_numbers) | set(overdue_numbers) | focused_pool)
+    candidate_pool = [num for num in candidate_pool if 3 <= num <= number_range - 2]
+
+    def is_valid_combination(nums):
+        nums = sorted(nums)
+        # 不允許三連號
+        if any(nums[i+1] - nums[i] == 1 and nums[i+2] - nums[i+1] == 1 for i in range(len(nums) - 2)):
+            return False
+        # 奇偶數比例
+        odd = sum(1 for n in nums if n % 2 == 1)
+        if not (2 <= odd <= number_count - 2):
+            return False
+        # 和值落在平均範圍
+        total = sum(nums)
+        avg_mean = df['mean'].mean()
+        avg_std = df['mean'].std()
+        if not (avg_mean - avg_std <= total / number_count <= avg_mean + avg_std):
+            return False
+        return True
 
     def generate():
-        while True:
-            pick = sorted(random.sample(pool, number_count))
-            if any(abs(pick[i] - pick[i + 1]) == 1 for i in range(number_count - 1)):
-                continue
-            odd = sum(1 for n in pick if n % 2 == 1)
-            if not (2 <= odd <= number_count - 2):
-                continue
-            if pick[0] < 5 or pick[-1] > number_range - 4:
-                continue
-            return pick
+        tries = 0
+        while tries < 1000:
+            pick = sorted(random.sample(candidate_pool, number_count))
+            if is_valid_combination(pick):
+                return pick
+            tries += 1
+        return sorted(random.sample(range(1, number_range + 1), number_count))  # fallback
 
-    picks = [generate() for _ in range(50000)]
-    flat = [n for pick in picks for n in pick]
-    most_common = [num for num, _ in Counter(flat).most_common(number_count * 2)]
-    final_pick = sorted(most_common[:number_count])
-    return final_pick
+    return generate()
 
 # === API 入口 ===
 @app.route("/lotto/update", methods=["POST"])
