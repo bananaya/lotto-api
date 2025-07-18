@@ -151,7 +151,7 @@ def recommend():
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet("推薦號碼")
     for name, count, num_range in games:
         pick = generate_recommendations_from_sheet(name, count, num_range)
-        row = [str(today), str(game_name), "統計推薦"] + [str(int(n)) for n in pick]
+        row = [str(today), str(name), "統計推薦"] + [str(int(n)) for n in pick]
         result.append(row)
     sheet.append_rows(result)
     return jsonify({"status": "ok", "data": result})    
