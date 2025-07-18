@@ -20,6 +20,8 @@ crawler = TaiwanLotteryCrawler()
 now = datetime.now()
 start_year = now.year - 10
 
+app = Flask(__name__)
+
 # === 彩券欄位對應 ===
 def extract_lotto649(draw, date_str):
     return [date_str, draw.get('期別')] + draw.get('獎號') + [draw.get('特別號')]
