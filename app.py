@@ -177,25 +177,26 @@ def update_lotto_data():
 def recommend():
     today = datetime.now().strftime("%Y/%m/%d")
     all_data = []
-    
+
     games = [
-        ("大樂透", 6, 49, 49),  # 特別號也 1~49
-        ("威力彩", 6, 38, 8),   # 特別號 1~8
-        ("今彩539", 5, 39, None)  # 無特別號
+        ("大樂透", 6, 49, 49),
+        ("威力彩", 6, 38, 8),
+        ("今彩539", 5, 39, None)
     ]
-    
-    # 替代組合A~D的名稱
+
     strategy_labels = {
         "A": "熱門號 + 熱門區間 + 有連號",
         "B": "冷號 + 冷門區間 + 無連號",
         "C": "區間平衡 + 餘數分布平均",
         "D": "歷史從未出現組合 + 低中高分布平均"
     }
-    
-    result = []
+
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet("推薦號碼")
+
     for game_name, number_count, number_range, special_range in games:
+        print(f"🎯 處理遊戲: {game_name}")
         results = generate_recommendations_from_sheet(game_name, number_count, number_range, special_range)
+        print(f"✅ {game_name} 結果: {results}")
         for idx, (main_nums, special_num) in enumerate(results):
             strategy_key = chr(ord("A") + idx)
             label = strategy_labels.get(strategy_key, f"組合{strategy_key}")
@@ -203,9 +204,12 @@ def recommend():
             if special_num is not None:
                 row.append(str(special_num))
             all_data.append(row)
-            
-    sheet.append_rows(all_data)
-    return jsonify({"status": "ok", "data": all_data})      
+
+    print(f"📝 即將寫入 {len(all_data)} 筆資料")
+    if all_data:
+        sheet.append_rows(all_data)
+
+    return jsonify({"status": "ok", "data": all_data})   
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
