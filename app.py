@@ -203,8 +203,9 @@ def recommend():
             if special_num is not None:
                 row.append(str(special_num))
             all_data.append(row)
-    sheet.append_rows(result)
-    return jsonify({"status": "ok", "data": result})      
+            
+    sheet.append_rows(all_data)
+    return jsonify({"status": "ok", "data": all_data})      
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
