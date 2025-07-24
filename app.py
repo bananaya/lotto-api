@@ -176,6 +176,8 @@ def update_lotto_data():
 @app.route("/lotto/recommend", methods=["POST"])
 def recommend():
     today = datetime.now().strftime("%Y/%m/%d")
+    all_data = []
+    
     games = [
         ("大樂透", 6, 49, 49),  # 特別號也 1~49
         ("威力彩", 6, 38, 8),   # 特別號 1~8
