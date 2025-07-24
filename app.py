@@ -9,6 +9,7 @@ from operator import itemgetter
 from TaiwanLottery import TaiwanLotteryCrawler
 import json, os
 from google.oauth2.service_account import Credentials
+import numpy as np
 
 # === Google Sheets 認證 ===
 SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
@@ -62,28 +63,34 @@ def fetch_and_write(game_key, sheet_name, extract_func):
         sheet.append_rows(sorted(rows, key=itemgetter(1)))
 
 # === 推薦號碼產生器 ===
-def generate_recommendations_from_sheet(sheet_name, number_count, number_range):
+# 固定亂數種子
+random.seed(42)
+np.random.seed(42)
+
+def generate_recommendations_from_sheet(sheet_name, number_count, number_range, special_range=None, sample_size=100000):
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
     records = sheet.get_all_values()[1:]
     columns = ["date", "term"] + [f"num{i}" for i in range(1, number_count + 1)]
-    if len(records[0]) > len(columns):
+    has_special = special_range is not None
+    if has_special:
         columns += ["special"]
     df = pd.DataFrame(records, columns=columns)
-        
-    # 整理號碼欄位並轉為整數
+
     number_cols = [f'num{i}' for i in range(1, number_count + 1)]
     df[number_cols] = df[number_cols].apply(pd.to_numeric, errors='coerce')
-    df = df.dropna(subset=number_cols)  # 去除不完整或無法解析的資料
+    df = df.dropna(subset=number_cols)
     df[number_cols] = df[number_cols].astype(int)
 
+    if has_special and "special" in df.columns:
+        df['special'] = pd.to_numeric(df['special'], errors='coerce')
+        df = df.dropna(subset=['special'])
+        df['special'] = df['special'].astype(int)
 
-    # 熱號 / 冷號
     all_numbers = df[number_cols].values.flatten()
     number_counts = Counter(all_numbers)
     hot_numbers = [num for num, _ in number_counts.most_common(10)]
     cold_numbers = [num for num, _ in number_counts.most_common()][-10:]
 
-    # 遺漏號（多久沒出現）
     last_seen = {i: -1 for i in range(1, number_range + 1)}
     for idx, row in df[::-1].iterrows():
         for n in row[number_cols]:
@@ -92,44 +99,71 @@ def generate_recommendations_from_sheet(sheet_name, number_count, number_range):
     overdue_numbers = sorted(last_seen.items(), key=lambda x: -x[1])[:15]
     overdue_numbers = [num for num, _ in overdue_numbers]
 
-    # 平均值 & 標準差
     df['mean'] = df[number_cols].mean(axis=1)
     df['std'] = df[number_cols].std(axis=1)
-    focused_df = df[df['std'] < 10]  # 集中期數
-    focused_numbers = focused_df[number_cols].values.flatten()
-    focused_pool = set(focused_numbers)
+    focused_df = df[df['std'] < 10]
+    focused_pool = set(focused_df[number_cols].values.flatten())
 
-    # 整合號碼池
-    candidate_pool = (set(hot_numbers) | set(cold_numbers) | set(overdue_numbers) | focused_pool)
-    candidate_pool = [num for num in candidate_pool if 3 <= num <= number_range - 2]
+    historical_combos = {tuple(sorted(row[number_cols])) for _, row in df.iterrows()}
 
     def is_valid_combination(nums):
         nums = sorted(nums)
-        # 不允許三連號
         if any(nums[i+1] - nums[i] == 1 and nums[i+2] - nums[i+1] == 1 for i in range(len(nums) - 2)):
             return False
-        # 奇偶數比例
         odd = sum(1 for n in nums if n % 2 == 1)
         if not (2 <= odd <= number_count - 2):
             return False
-        # 和值落在平均範圍
-        total = sum(nums)
-        avg_mean = df['mean'].mean()
-        avg_std = df['mean'].std()
-        if not (avg_mean - avg_std <= total / number_count <= avg_mean + avg_std):
-            return False
         return True
 
-    def generate():
-        tries = 0
-        while tries < 1000:
-            pick = sorted(random.sample(candidate_pool, number_count))
-            if is_valid_combination(pick):
-                return pick
-            tries += 1
-        return sorted(random.sample(range(1, number_range + 1), number_count))  # fallback
+    def choose_special(main_nums):
+        if not has_special:
+            return None
+        special_pool = list(set(range(1, special_range + 1)) - set(main_nums))
+        if not special_pool:
+            special_pool = list(range(1, special_range + 1))
+        if "special" in df.columns:
+            special_counts = Counter(df["special"])
+            distances = {n: min(abs(n - m) for m in main_nums) for n in special_pool}
+            filtered = [n for n in special_pool if distances[n] >= 2]
+            candidates = filtered if filtered else special_pool
+            weights = [special_counts.get(n, 1) for n in candidates]
+            probs = [w / sum(weights) for w in weights]
+            return int(np.random.choice(candidates, 1, p=probs)[0])
+        else:
+            return int(random.choice(special_pool))
 
-    return generate()
+    def generate_combo(strategy):
+        if strategy == "A":
+            pool = list(set(hot_numbers) | focused_pool)
+        elif strategy == "B":
+            pool = list(set(cold_numbers) | set(range(1, number_range + 1)) - set(hot_numbers))
+        elif strategy == "C":
+            pool = list(range(1, number_range + 1))
+        elif strategy == "D":
+            pool = list(set(range(1, number_range + 1)))
+        else:
+            pool = list(range(1, number_range + 1))
+
+        weights = [number_counts.get(num, 1) for num in pool]
+        probabilities = [w / sum(weights) for w in weights]
+
+        tries = 0
+        while tries < 5000:
+            pick = tuple(sorted(np.random.choice(pool, number_count, replace=False, p=probabilities)))
+            if not is_valid_combination(pick):
+                tries += 1
+                continue
+            if strategy == "D" and pick in historical_combos:
+                tries += 1
+                continue
+            return list(pick), choose_special(pick)
+        return sorted(random.sample(range(1, number_range + 1), number_count)), choose_special([])
+
+    results = []
+    for strategy in ["A", "B", "C", "D"]:
+        main_nums, special_num = generate_combo(strategy)
+        results.append((main_nums, special_num))
+    return results
 
 # === API 入口 ===
 @app.route("/lotto/update", methods=["POST"])
@@ -143,18 +177,32 @@ def update_lotto_data():
 def recommend():
     today = datetime.now().strftime("%Y/%m/%d")
     games = [
-        ("大樂透", 6, 49),
-        ("威力彩", 6, 38),
-        ("今彩539", 5, 39),
+        ("大樂透", 6, 49, 49),  # 特別號也 1~49
+        ("威力彩", 6, 38, 8),   # 特別號 1~8
+        ("今彩539", 5, 39, None)  # 無特別號
     ]
+    
+    # 替代組合A~D的名稱
+    strategy_labels = {
+        "A": "熱門號 + 熱門區間 + 有連號",
+        "B": "冷號 + 冷門區間 + 無連號",
+        "C": "區間平衡 + 餘數分布平均",
+        "D": "歷史從未出現組合 + 低中高分布平均"
+    }
+    
     result = []
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet("推薦號碼")
-    for name, count, num_range in games:
-        pick = generate_recommendations_from_sheet(name, count, num_range)
-        row = [str(today), str(name), "統計推薦"] + [str(int(n)) for n in pick]
-        result.append(row)
+    for game_name, number_count, number_range, special_range in games:
+        results = generate_recommendations_from_sheet(game_name, number_count, number_range, special_range)
+        for idx, (main_nums, special_num) in enumerate(results):
+            strategy_key = chr(ord("A") + idx)
+            label = strategy_labels.get(strategy_key, f"組合{strategy_key}")
+            row = [str(today), game_name, label] + [str(n) for n in main_nums]
+            if special_num is not None:
+                row.append(str(special_num))
+            all_data.append(row)
     sheet.append_rows(result)
-    return jsonify({"status": "ok", "data": result})    
+    return jsonify({"status": "ok", "data": result})      
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
