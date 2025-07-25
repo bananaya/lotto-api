@@ -1,3 +1,4 @@
+import logging
 from flask import Flask, request, jsonify
 from datetime import datetime
 import gspread
@@ -10,6 +11,10 @@ from TaiwanLottery import TaiwanLotteryCrawler
 import json, os
 from google.oauth2.service_account import Credentials
 import numpy as np
+
+# === 設定 logging ===
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # === Google Sheets 認證 ===
 SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
@@ -57,10 +62,13 @@ def fetch_and_write(game_key, sheet_name, extract_func):
                         rows.append(row)
                         existing_dates.add(date_str)
             except Exception as e:
-                print(f"❌ 抓取失敗 {sheet_name} {year}/{month:02d}：{e}")
+                logger.warning(f"抓取失敗 {sheet_name} {year}/{month:02d}：{e}")
                 continue
     if rows:
         sheet.append_rows(sorted(rows, key=itemgetter(1)))
+        logger.info(f"{sheet_name} 共新增 {len(rows)} 筆資料")
+    else:
+        logger.info(f"{sheet_name} 無新增資料")
 
 # === 推薦號碼產生器 ===
 # 固定亂數種子
@@ -68,6 +76,7 @@ random.seed(42)
 np.random.seed(42)
 
 def generate_recommendations_from_sheet(sheet_name, number_count, number_range, special_range=None, sample_size=100000):
+    logger.info(f"產生推薦號碼：{sheet_name}")
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
     records = sheet.get_all_values()[1:]
     columns = ["date", "term"] + [f"num{i}" for i in range(1, number_count + 1)]
@@ -162,15 +171,18 @@ def generate_recommendations_from_sheet(sheet_name, number_count, number_range, 
     results = []
     for strategy in ["A", "B", "C", "D"]:
         main_nums, special_num = generate_combo(strategy)
+        logger.info(f"策略 {strategy} 推薦號碼：{main_nums} 特別號：{special_num}")
         results.append((main_nums, special_num))
     return results
 
 # === API 入口 ===
 @app.route("/lotto/update", methods=["POST"])
 def update_lotto_data():
+    logger.info("開始更新彩券資料...")
     fetch_and_write("lotto649", "大樂透", extract_lotto649)
     fetch_and_write("daily_cash", "今彩539", extract_daily539)
     fetch_and_write("super_lotto", "威力彩", extract_powerlotto)
+    logger.info("✅ 資料更新完成")
     return jsonify({"status": "ok", "message": "更新完成"})
 
 @app.route("/lotto/recommend", methods=["POST"])
@@ -193,10 +205,8 @@ def recommend():
 
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet("推薦號碼")
 
-    for game_name, number_count, number_range, special_range in games:
-        print(f"🎯 處理遊戲: {game_name}")
-        results = generate_recommendations_from_sheet(game_name, number_count, number_range, special_range)
-        print(f"✅ {game_name} 結果: {results}")
+    for game_name, number_count, number_range, special_range in games:        
+        results = generate_recommendations_from_sheet(game_name, number_count, number_range, special_range)        
         for idx, (main_nums, special_num) in enumerate(results):
             strategy_key = chr(ord("A") + idx)
             label = strategy_labels.get(strategy_key, f"組合{strategy_key}")
@@ -205,7 +215,7 @@ def recommend():
                 row.append(str(special_num))
             all_data.append(row)
 
-    print(f"📝 即將寫入 {len(all_data)} 筆資料")
+    logger.info(f"寫入推薦資料，共 {len(all_data)} 筆")
     if all_data:
         sheet.append_rows(all_data)
 
